@@ -12,3 +12,16 @@ impl Default for Ram {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct DisplayRam {
+    pub buffer: [[u8; consts::CHIP8_WIDTH]; consts::CHIP8_HEIGHT],
+}
+
+impl Default for DisplayRam {
+    fn default() -> Self {
+        DisplayRam {
+            buffer: [[0; consts::CHIP8_WIDTH]; consts::CHIP8_HEIGHT],
+        }
+    }
+}

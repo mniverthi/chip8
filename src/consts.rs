@@ -1,5 +1,5 @@
-pub const DISPL_WIDTH: usize = 64;
-pub const DISPL_HEIGHT: usize = 32;
+pub const CHIP8_WIDTH: usize = 64;
+pub const CHIP8_HEIGHT: usize = 32;
 pub const OP_CODE_BYTES: usize = 2;
 pub const RAM_BYTES: usize = 4096;
 pub const REG_COUNT: usize = 16;
@@ -14,3 +14,7 @@ pub const FONT_SET: [u8; 80] = [
 ];
 pub const FONT_SET_SIZE: usize = 80;
 pub const PROG_OFFSET: usize = 512;
+
+pub const SCALE_FACTOR: u32 = 20;
+pub const DISPL_WIDTH: u32 = (CHIP8_WIDTH as u32) * SCALE_FACTOR;
+pub const DISPL_HEIGHT: u32 = (CHIP8_HEIGHT as u32) * SCALE_FACTOR;

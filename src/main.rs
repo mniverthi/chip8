@@ -1,5 +1,6 @@
 pub mod consts;
-mod core;
+pub mod core;
+
 use crate::core::{processor, ram, rom};
 use std::env;
 use std::rc::Rc;
@@ -16,9 +17,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
+    let display_ram_ = ram::DisplayRam {
+        ..Default::default()
+    };
+
     let mut chip8 = processor::Processor {
         stack_pointer: 0,
         ram: Rc::new(ram_),
+        display_ram: Rc::new(display_ram_),
         ..Default::default()
     };
     chip8.init_ram(&prog, &consts::FONT_SET)?;

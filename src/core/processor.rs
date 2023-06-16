@@ -12,6 +12,7 @@ pub struct Processor {
     pub delay_timer: u8,
     pub sound_timer: u8,
     pub ram: Rc<ram::Ram>,
+    pub display_ram: Rc<ram::DisplayRam>,
 }
 
 impl Processor {
