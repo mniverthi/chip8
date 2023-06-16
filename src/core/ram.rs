@@ -2,7 +2,7 @@ use crate::consts;
 
 #[derive(Debug)]
 pub struct Ram {
-    buffer: [u8; consts::RAM_BYTES],
+    pub buffer: [u8; consts::RAM_BYTES],
 }
 
 impl Default for Ram {

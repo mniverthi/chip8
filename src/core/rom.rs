@@ -5,7 +5,7 @@ use crate::consts;
 
 #[derive(Debug)]
 pub struct Rom {
-    buffer: [u8; consts::MAX_ROM_BYTES],
+    pub buffer: [u8; consts::MAX_ROM_BYTES],
 }
 
 impl Default for Rom {
@@ -17,19 +17,13 @@ impl Default for Rom {
 }
 
 impl Rom {
-    fn new(path: &str) -> Result<Self, &str> {
+    pub fn new(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let mut data: Rom = Default::default();
-        let mut file = match File::open(path) {
-            Ok(s) => s,
-            Err(a) => return Err("Failed to open file"),
-        };
-        let status = match file.read(&mut data.buffer) {
-            Ok(s) => s,
-            Err(a) => return Err("Failed to read file"),
-        };
+        let mut file = File::open(path)?;
+        let status = file.read(&mut data.buffer)?;
         if status <= data.buffer.len() {
             return Ok(data);
         }
-        return Err("Mismatch in expected ROM size and number of bytes read");
+        return Err("Mismatch in expected ROM size and number of bytes read".into());
     }
 }
