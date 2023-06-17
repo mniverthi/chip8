@@ -1,9 +1,9 @@
 pub mod consts;
 pub mod core;
+pub mod utils;
 
 use crate::core::{processor, ram, rom};
 use std::env;
-use std::rc::Rc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -17,16 +17,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    let display_ram_ = ram::DisplayRam {
+    let display_ram_ = ram::DisplayBuffer {
         ..Default::default()
     };
 
-    let mut chip8 = processor::Processor {
-        stack_pointer: 0,
-        ram: Rc::new(ram_),
-        display_ram: Rc::new(display_ram_),
+    let keyboard_buffer_ = ram::KeyboardBuffer {
         ..Default::default()
     };
+    let mut chip8 = processor::Processor::new(ram_, display_ram_, keyboard_buffer_);
     chip8.init_ram(&prog, &consts::FONT_SET)?;
     println!("{:?}", chip8);
     Ok(())
