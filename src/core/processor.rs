@@ -55,7 +55,7 @@ impl Processor {
             &(self.ram.as_ref().buffer
                 [(self.pc) as usize..((self.pc + (consts::OP_CODE_BYTES as u16)) as usize)]),
         );
-        self.pc += (consts::OP_CODE_BYTES as u16);
+        self.pc += consts::OP_CODE_BYTES as u16;
         let (opcode, x, y, n) = instr_nibbles;
         let nn = (y << 4) | n;
         let nnn = ((x as u16) << 8) | ((y as u16) << 4) | (n as u16);
@@ -128,27 +128,27 @@ impl Processor {
             (3, _, _, _) => {
                 let vx_data = self.registers[x as usize];
                 if vx_data == nn {
-                    self.pc += (consts::OP_CODE_BYTES as u16);
+                    self.pc += consts::OP_CODE_BYTES as u16;
                 }
             }
             (4, _, _, _) => {
                 let vx_data = self.registers[x as usize];
                 if vx_data != nn {
-                    self.pc += (consts::OP_CODE_BYTES as u16);
+                    self.pc += consts::OP_CODE_BYTES as u16;
                 }
             }
             (5, _, _, 0) => {
                 let vx_data = self.registers[x as usize];
                 let vy_data = self.registers[y as usize];
                 if vx_data == vy_data {
-                    self.pc += (consts::OP_CODE_BYTES as u16);
+                    self.pc += consts::OP_CODE_BYTES as u16;
                 }
             }
             (9, _, _, 0) => {
                 let vx_data = self.registers[x as usize];
                 let vy_data = self.registers[y as usize];
                 if vx_data != vy_data {
-                    self.pc += (consts::OP_CODE_BYTES as u16);
+                    self.pc += consts::OP_CODE_BYTES as u16;
                 }
             }
 
@@ -226,12 +226,12 @@ impl Processor {
             // Skip on keypress
             (0xE, _, 9, 0xE) => {
                 if keyboard[self.registers[x as usize] as usize] == 1 {
-                    self.pc += (consts::OP_CODE_BYTES as u16);
+                    self.pc += consts::OP_CODE_BYTES as u16;
                 }
             }
             (0xE, _, 0xA, 1) => {
                 if keyboard[self.registers[x as usize] as usize] != 1 {
-                    self.pc += (consts::OP_CODE_BYTES as u16);
+                    self.pc += consts::OP_CODE_BYTES as u16;
                 }
             }
 
@@ -254,7 +254,7 @@ impl Processor {
             // Halt till keyboard interrupt
             (0xF, _, 0, 0xA) => {
                 if keyboard.iter().all(|x| *x == 0) {
-                    self.pc -= (consts::OP_CODE_BYTES as u16);
+                    self.pc -= consts::OP_CODE_BYTES as u16;
                 } else {
                     for i in 0..consts::KEYBOARD_SIZE {
                         if keyboard[i] == 1 {
