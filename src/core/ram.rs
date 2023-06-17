@@ -14,14 +14,19 @@ impl Default for Ram {
 }
 
 #[derive(Debug)]
-pub struct DisplayRam {
+pub struct DisplayBuffer {
     pub buffer: [[u8; consts::CHIP8_WIDTH]; consts::CHIP8_HEIGHT],
 }
 
-impl Default for DisplayRam {
+impl Default for DisplayBuffer {
     fn default() -> Self {
-        DisplayRam {
+        DisplayBuffer {
             buffer: [[0; consts::CHIP8_WIDTH]; consts::CHIP8_HEIGHT],
         }
     }
+}
+
+#[derive(Default, Debug)]
+pub struct KeyboardBuffer {
+    pub buffer: [u8; consts::KEYBOARD_SIZE],
 }
