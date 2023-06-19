@@ -415,13 +415,13 @@ mod tests {
 
         update_buffer(ram, (START_PC + 1) as usize, 0xEE);
 
-        processor.stack_pointer = 5;
-        processor.stack[4] = 0x6666;
+        processor.stack_pointer = 3;
+        processor.stack[2] = 0x1234;
 
         processor.cycle();
 
-        assert_eq!(processor.stack_pointer, 4);
-        assert_eq!(processor.pc, 0x6666);
+        assert_eq!(processor.stack_pointer, 2);
+        assert_eq!(processor.pc, 0x1234);
         Ok(())
     }
 
@@ -434,10 +434,10 @@ mod tests {
             None => return Err("Failed test, could not retrieve ram buffer"),
         };
 
-        update_buffer(ram, (START_PC) as usize, 0x16);
-        update_buffer(ram, (START_PC + 1) as usize, 0x66);
+        update_buffer(ram, (START_PC) as usize, 0x11);
+        update_buffer(ram, (START_PC + 1) as usize, 0x23);
         processor.cycle();
-        assert_eq!(processor.pc, 0x0666);
+        assert_eq!(processor.pc, 0x0123);
         assert_eq!(processor.stack_pointer, 0);
         Ok(())
     }
@@ -451,10 +451,10 @@ mod tests {
             None => return Err("Failed test, could not retrieve ram buffer"),
         };
 
-        update_buffer(ram, (START_PC) as usize, 0x26);
-        update_buffer(ram, (START_PC + 1) as usize, 0x66);
+        update_buffer(ram, (START_PC) as usize, 0x21);
+        update_buffer(ram, (START_PC + 1) as usize, 0x23);
         processor.cycle();
-        assert_eq!(processor.pc, 0x0666);
+        assert_eq!(processor.pc, 0x0123);
         assert_eq!(processor.stack_pointer, 1);
         assert_eq!(processor.stack[0], NEXT_PC);
         Ok(())
