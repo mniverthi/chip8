@@ -249,7 +249,9 @@ impl Processor {
 
             // Update index register
             (0xF, _, 1, 0xE) => {
-                self.idx_register += self.registers[x as usize] as u16;
+                self.idx_register = self
+                    .idx_register
+                    .wrapping_add(self.registers[x as usize] as u16);
             }
 
             // Halt till keyboard interrupt
@@ -800,6 +802,330 @@ mod tests {
         assert_eq!(processor.registers[0xA], 0xFE);
         assert_eq!(processor.registers[0x6], 3);
         assert_eq!(processor.registers[0xF], 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_8xye() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+        processor.registers[0] = 0xFF;
+        update_buffer(ram, (START_PC) as usize, 0x80);
+        update_buffer(ram, (START_PC + 1) as usize, 0x6E);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.registers[0x0], 0xFE);
+        assert_eq!(processor.registers[0x6], 3);
+        assert_eq!(processor.registers[0xF], 1);
+        processor.pc -= consts::OP_CODE_BYTES as u16;
+        processor.registers[0] = 0x7F;
+        processor.cycle();
+        assert_eq!(processor.registers[0x0], 0xFE);
+        assert_eq!(processor.registers[0x6], 3);
+        assert_eq!(processor.registers[0xF], 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_8xy6() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+        processor.registers[0] = 0xFF;
+        update_buffer(ram, (START_PC) as usize, 0x80);
+        update_buffer(ram, (START_PC + 1) as usize, 0x66);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.registers[0x0], 0x7F);
+        assert_eq!(processor.registers[0x6], 3);
+        assert_eq!(processor.registers[0xF], 1);
+        processor.pc -= consts::OP_CODE_BYTES as u16;
+        processor.registers[0] = 0xFE;
+        processor.cycle();
+        assert_eq!(processor.registers[0x0], 0x7F);
+        assert_eq!(processor.registers[0x6], 3);
+        assert_eq!(processor.registers[0xF], 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_annn() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+        update_buffer(ram, (START_PC) as usize, 0xA0);
+        update_buffer(ram, (START_PC + 1) as usize, 0x12);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.idx_register, 0x0012);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_bnnn() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+        update_buffer(ram, (START_PC) as usize, 0xB0);
+        update_buffer(ram, (START_PC + 1) as usize, 0x12);
+        processor.cycle();
+        assert_eq!(processor.pc, 0x0012);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_ex9e_press() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        let keyboard_buffer = match Rc::get_mut(&mut processor.keyboard_buffer) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve display buffer"),
+        };
+        keyboard_buffer[0] = 1;
+        update_buffer(ram, (START_PC) as usize, 0xE1);
+        update_buffer(ram, (START_PC + 1) as usize, 0x9E);
+        processor.cycle();
+        assert_eq!(processor.pc, SKIPPED_PC);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_ex9e_unpress() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        update_buffer(ram, (START_PC) as usize, 0xE1);
+        update_buffer(ram, (START_PC + 1) as usize, 0x9E);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_exa1_press() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        let keyboard_buffer = match Rc::get_mut(&mut processor.keyboard_buffer) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve display buffer"),
+        };
+        keyboard_buffer[0] = 1;
+        update_buffer(ram, (START_PC) as usize, 0xE1);
+        update_buffer(ram, (START_PC + 1) as usize, 0xA1);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_exa1_unpress() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        update_buffer(ram, (START_PC) as usize, 0xE1);
+        update_buffer(ram, (START_PC + 1) as usize, 0xA1);
+        processor.cycle();
+        assert_eq!(processor.pc, SKIPPED_PC);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_fx07() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        processor.delay_timer = 10;
+        update_buffer(ram, (START_PC) as usize, 0xF1);
+        update_buffer(ram, (START_PC + 1) as usize, 0x07);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.registers[1], 10);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_fx15() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        processor.registers[1] = 10;
+        update_buffer(ram, (START_PC) as usize, 0xF1);
+        update_buffer(ram, (START_PC + 1) as usize, 0x15);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.delay_timer, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_fx18() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        processor.registers[1] = 10;
+        update_buffer(ram, (START_PC) as usize, 0xF1);
+        update_buffer(ram, (START_PC + 1) as usize, 0x18);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.sound_timer, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_fx1e() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        processor.registers[1] = 0x8;
+        processor.idx_register = 0xFFFF;
+        update_buffer(ram, (START_PC) as usize, 0xF1);
+        update_buffer(ram, (START_PC + 1) as usize, 0x1e);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.idx_register, 7);
+        assert_eq!(processor.registers[0xF], 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_fx0a() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+
+        update_buffer(ram, (START_PC) as usize, 0xF1);
+        update_buffer(ram, (START_PC + 1) as usize, 0x0A);
+        processor.cycle();
+        assert_eq!(processor.pc, START_PC);
+
+        let keyboard_buffer = match Rc::get_mut(&mut processor.keyboard_buffer) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve display buffer"),
+        };
+        keyboard_buffer[0xF] = 1;
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.registers[1], 0xF);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_fx33() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+        processor.idx_register = 25;
+        processor.registers[4] = 156;
+        update_buffer(ram, (START_PC) as usize, 0xF4);
+        update_buffer(ram, (START_PC + 1) as usize, 0x33);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.ram.buffer[25], 1);
+        assert_eq!(processor.ram.buffer[26], 5);
+        assert_eq!(processor.ram.buffer[27], 6);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_fx55() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+        processor.idx_register = 25;
+        processor.registers[0] = 12;
+        processor.registers[1] = 25;
+        processor.registers[2] = 13;
+        processor.registers[4] = 14;
+        update_buffer(ram, (START_PC) as usize, 0xF4);
+        update_buffer(ram, (START_PC + 1) as usize, 0x55);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.ram.buffer[25], 12);
+        assert_eq!(processor.ram.buffer[26], 25);
+        assert_eq!(processor.ram.buffer[27], 13);
+        assert_eq!(processor.ram.buffer[28], 1);
+        assert_eq!(processor.ram.buffer[29], 14);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opcode_fx65() -> Result<(), &'static str> {
+        let mut processor = build_processor()?;
+
+        let ram = match Rc::get_mut(&mut processor.ram) {
+            Some(t) => &mut t.buffer,
+            None => return Err("Failed test, could not retrieve ram buffer"),
+        };
+        processor.idx_register = 0;
+        ram[0] = 12;
+        ram[1] = 25;
+        ram[2] = 13;
+        ram[4] = 14;
+        update_buffer(ram, (START_PC) as usize, 0xF4);
+        update_buffer(ram, (START_PC + 1) as usize, 0x65);
+        processor.cycle();
+        assert_eq!(processor.pc, NEXT_PC);
+        assert_eq!(processor.registers[0], 12);
+        assert_eq!(processor.registers[1], 25);
+        assert_eq!(processor.registers[2], 13);
+        assert_eq!(processor.registers[3], 0);
+        assert_eq!(processor.registers[4], 14);
         Ok(())
     }
 }
