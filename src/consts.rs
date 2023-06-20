@@ -20,3 +20,4 @@ pub const DISPL_WIDTH: u32 = (CHIP8_WIDTH as u32) * SCALE_FACTOR;
 pub const DISPL_HEIGHT: u32 = (CHIP8_HEIGHT as u32) * SCALE_FACTOR;
 
 pub const KEYBOARD_SIZE: usize = 16;
+pub const CLOCK_PERIOD: usize = 2;
