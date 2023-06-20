@@ -2,6 +2,7 @@ use sdl2;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 
+use crate::consts;
 use crate::core::ram::KeyboardBuffer;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -39,6 +40,8 @@ impl KeyboardDriver {
             .pressed_scancodes()
             .filter_map(Keycode::from_scancode)
             .collect();
+
+        self.keyboard_buffer.borrow_mut().buffer = [0; consts::KEYBOARD_SIZE];
 
         for key in keys {
             let index = match key {

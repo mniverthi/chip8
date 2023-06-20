@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let status = match chip8.cycle() {
             Some(a) => a,
-            None => panic!("This shouldn't happen"),
+            None => panic!("Failed during execution, exiting..."),
         };
         match status {
             processor::CycleStatus::RedrawScreen => {
