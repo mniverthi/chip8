@@ -3,11 +3,14 @@ use crate::core::{ram, rom};
 use crate::utils;
 use rand::rngs::ThreadRng;
 use rand::Rng;
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub enum CycleStatus {
     RedrawScreen,
     Continue,
+    Waiting,
 }
 
 #[derive(Default, Debug)]
@@ -19,9 +22,9 @@ pub struct Processor {
     pub stack_pointer: u8,
     pub delay_timer: u8,
     pub sound_timer: u8,
-    pub ram: Rc<ram::Ram>,
-    pub display_buffer: Rc<ram::DisplayBuffer>,
-    pub keyboard_buffer: Rc<ram::KeyboardBuffer>,
+    pub ram: ram::Ram,
+    pub display_buffer: Rc<RefCell<ram::DisplayBuffer>>,
+    pub keyboard_buffer: Rc<RefCell<ram::KeyboardBuffer>>,
     rng: ThreadRng,
 }
 
@@ -33,22 +36,16 @@ impl Processor {
     ) -> Self {
         Processor {
             pc: 0x200,
-            ram: Rc::new(ram_),
-            display_buffer: Rc::new(display_ram_),
-            keyboard_buffer: Rc::new(keyboard_buffer_),
+            ram: ram_,
+            display_buffer: Rc::new(RefCell::new(display_ram_)),
+            keyboard_buffer: Rc::new(RefCell::new(keyboard_buffer_)),
             rng: rand::thread_rng(),
             ..Default::default()
         }
     }
     pub fn init_ram(&mut self, rom: &rom::Rom, fonts: &[u8]) -> Result<(), &'static str> {
-        let _ = match Rc::get_mut(&mut self.ram) {
-            Some(s) => {
-                s.buffer[0..consts::FONT_SET_SIZE].clone_from_slice(fonts);
-                s.buffer[consts::PROG_OFFSET..].clone_from_slice(&rom.buffer);
-                Ok(())
-            }
-            None => Err("Could not copy ROM into RAM"),
-        };
+        self.ram.buffer[0..consts::FONT_SET_SIZE].clone_from_slice(fonts);
+        self.ram.buffer[consts::PROG_OFFSET..].clone_from_slice(&rom.buffer);
         Ok(())
     }
     pub fn cycle(&mut self) -> Option<CycleStatus> {
@@ -60,16 +57,43 @@ impl Processor {
         let (opcode, x, y, n) = instr_nibbles;
         let nn = (y << 4) | n;
         let nnn = ((x as u16) << 8) | ((y as u16) << 4) | (n as u16);
-        let keyboard = self.keyboard_buffer.buffer.clone();
+        let keyboard = self.keyboard_buffer.borrow().buffer;
+
+        match (opcode, x, y, n) {
+            // Halt till keyboard interrupt
+            (0xF, _, 0, 0xA) => {
+                if keyboard.iter().all(|x| *x == 0) {
+                    self.pc -= consts::OP_CODE_BYTES as u16;
+                    return Some(CycleStatus::Waiting);
+                } else {
+                    for i in 0..consts::KEYBOARD_SIZE {
+                        if keyboard[i] == 1 {
+                            self.registers[x as usize] = i as u8;
+                            break;
+                        }
+                    }
+                }
+                return Some(CycleStatus::Continue);
+            }
+            (_, _, _, _) => {
+                if self.delay_timer > 0 {
+                    self.delay_timer -= 1
+                }
+                if self.sound_timer > 0 {
+                    self.sound_timer -= 1
+                }
+            }
+        }
 
         match (opcode, x, y, n) {
             // Clears screen
             (0, 0, 0xE, 0) => {
-                (Rc::get_mut(&mut self.display_buffer))?
+                self.display_buffer
+                    .as_ref()
+                    .borrow_mut()
                     .buffer
                     .iter_mut()
                     .for_each(|x| *x = [0 as u8; consts::CHIP8_WIDTH]);
-
                 return Some(CycleStatus::RedrawScreen);
             }
 
@@ -79,7 +103,9 @@ impl Processor {
                 let y_coord = self.registers[y as usize] % (consts::CHIP8_HEIGHT as u8);
                 let sprite_vals = &self.ram.buffer
                     [(self.idx_register as usize)..((self.idx_register + (n as u16)) as usize)];
-                let vram = &mut Rc::get_mut(&mut self.display_buffer)?.buffer;
+                let mut display_buffer = self.display_buffer.as_ref().borrow_mut();
+                let vram: &mut [[u8; consts::CHIP8_WIDTH]; consts::CHIP8_HEIGHT] =
+                    display_buffer.borrow_mut().buffer.borrow_mut();
                 for i in 0..n {
                     let curr_sprite_val = sprite_vals[i as usize];
                     for shift_pos in 0..8 {
@@ -89,8 +115,8 @@ impl Processor {
                             consts::CHIP8_WIDTH,
                             consts::CHIP8_HEIGHT,
                         ) {
-                            let mask = (1 << (7 - i)) as u8;
-                            let should_flip = (mask & curr_sprite_val) >> (7 - i);
+                            let mask = (1 << (7 - shift_pos)) as u8;
+                            let should_flip = (mask & curr_sprite_val) >> (7 - shift_pos);
                             if should_flip == 1 {
                                 if vram[(y_coord + i) as usize][(x_coord + shift_pos) as usize] == 1
                                 {
@@ -254,20 +280,6 @@ impl Processor {
                     .wrapping_add(self.registers[x as usize] as u16);
             }
 
-            // Halt till keyboard interrupt
-            (0xF, _, 0, 0xA) => {
-                if keyboard.iter().all(|x| *x == 0) {
-                    self.pc -= consts::OP_CODE_BYTES as u16;
-                } else {
-                    for i in 0..consts::KEYBOARD_SIZE {
-                        if keyboard[i] == 1 {
-                            self.registers[x as usize] = i as u8;
-                            break;
-                        }
-                    }
-                }
-            }
-
             // Point index to font character
             (0xF, _, 2, 9) => {
                 self.idx_register = (self.registers[x as usize] * 5) as u16;
@@ -279,7 +291,7 @@ impl Processor {
                 let first_digit = num / 100;
                 let second_digit = (num % 100) / 10;
                 let third_digit = num % 10;
-                let ram_ref = &mut Rc::get_mut(&mut self.ram)?.buffer;
+                let ram_ref: &mut [u8] = self.ram.borrow_mut().buffer.borrow_mut();
                 ram_ref[self.idx_register as usize] = first_digit;
                 ram_ref[(self.idx_register + 1) as usize] = second_digit;
                 ram_ref[(self.idx_register + 2) as usize] = third_digit;
@@ -287,7 +299,7 @@ impl Processor {
 
             // Store and load memory
             (0xF, _, 5, 5) => {
-                let ram_ref = &mut Rc::get_mut(&mut self.ram)?.buffer;
+                let ram_ref: &mut [u8] = self.ram.borrow_mut().buffer.borrow_mut();
                 for i in 0..(x + 1) {
                     ram_ref[(self.idx_register + i as u16) as usize] = self.registers[i as usize];
                 }
@@ -319,7 +331,7 @@ mod tests {
     use crate::consts;
     use crate::processor::Processor;
     use crate::{ram, rom};
-    use std::rc::Rc;
+    use std::borrow::BorrowMut;
 
     const START_PC: u16 = 0xF00;
     const NEXT_PC: u16 = START_PC + (consts::OP_CODE_BYTES as u16);
@@ -382,24 +394,21 @@ mod tests {
     fn test_opcode_00e0() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let display_ram = match Rc::get_mut(&mut processor.display_buffer) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve display buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
-
-        *display_ram = [[128; consts::CHIP8_WIDTH]; consts::CHIP8_HEIGHT];
+        *processor
+            .display_buffer
+            .as_ref()
+            .borrow_mut()
+            .buffer
+            .borrow_mut() = [[128; consts::CHIP8_WIDTH]; consts::CHIP8_HEIGHT];
         update_buffer(ram, (START_PC + 1) as usize, 0xE0);
 
         processor.cycle();
 
         for y in 0..consts::CHIP8_HEIGHT {
             for x in 0..consts::CHIP8_WIDTH {
-                assert_eq!(processor.display_buffer.buffer[y][x], 0);
+                assert_eq!(processor.display_buffer.as_ref().borrow().buffer[y][x], 0);
             }
         }
         assert_eq!(processor.pc, NEXT_PC);
@@ -410,10 +419,7 @@ mod tests {
     fn test_opcode_00ee() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         update_buffer(ram, (START_PC + 1) as usize, 0xEE);
 
@@ -431,10 +437,7 @@ mod tests {
     fn test_opcode_1nnn() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         update_buffer(ram, (START_PC) as usize, 0x11);
         update_buffer(ram, (START_PC + 1) as usize, 0x23);
@@ -448,10 +451,7 @@ mod tests {
     fn test_opcode_2nnn() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         update_buffer(ram, (START_PC) as usize, 0x21);
         update_buffer(ram, (START_PC + 1) as usize, 0x23);
@@ -466,10 +466,8 @@ mod tests {
     fn test_opcode_3xnn_equal() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x32);
         update_buffer(ram, (START_PC + 1) as usize, 0x01);
         processor.cycle();
@@ -481,10 +479,8 @@ mod tests {
     fn test_opcode_3xnn_unequal() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x32);
         update_buffer(ram, (START_PC + 1) as usize, 0x00);
         processor.cycle();
@@ -496,10 +492,8 @@ mod tests {
     fn test_opcode_4xnn_equal() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x42);
         update_buffer(ram, (START_PC + 1) as usize, 0x01);
         processor.cycle();
@@ -511,10 +505,8 @@ mod tests {
     fn test_opcode_4xnn_unequal() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x42);
         update_buffer(ram, (START_PC + 1) as usize, 0x00);
         processor.cycle();
@@ -525,10 +517,8 @@ mod tests {
     fn test_opcode_5xy0_equal() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x52);
         update_buffer(ram, (START_PC + 1) as usize, 0x20);
         processor.cycle();
@@ -540,10 +530,8 @@ mod tests {
     fn test_opcode_5xy0_unequal() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x52);
         update_buffer(ram, (START_PC + 1) as usize, 0x90);
         processor.cycle();
@@ -555,10 +543,8 @@ mod tests {
     fn test_opcode_9xy0_equal() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x92);
         update_buffer(ram, (START_PC + 1) as usize, 0x20);
         processor.cycle();
@@ -570,10 +556,8 @@ mod tests {
     fn test_opcode_9xy0_unequal() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x92);
         update_buffer(ram, (START_PC + 1) as usize, 0x90);
         processor.cycle();
@@ -585,10 +569,8 @@ mod tests {
     fn test_opcode_6xnn() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x63);
         update_buffer(ram, (START_PC + 1) as usize, 0xF0);
         processor.cycle();
@@ -601,10 +583,8 @@ mod tests {
     fn test_opcode_7xnn_with_overflow() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x73);
         update_buffer(ram, (START_PC + 1) as usize, 0xFF);
         processor.cycle();
@@ -618,10 +598,8 @@ mod tests {
     fn test_opcode_8xy0() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x83);
         update_buffer(ram, (START_PC + 1) as usize, 0xF0);
         processor.cycle();
@@ -635,10 +613,8 @@ mod tests {
     fn test_opcode_8xy1() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x83);
         update_buffer(ram, (START_PC + 1) as usize, 0x81);
         processor.cycle();
@@ -652,10 +628,8 @@ mod tests {
     fn test_opcode_8xy2() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x86);
         update_buffer(ram, (START_PC + 1) as usize, 0xA2);
         processor.cycle();
@@ -669,10 +643,8 @@ mod tests {
     fn test_opcode_8xy3() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x86);
         update_buffer(ram, (START_PC + 1) as usize, 0xA3);
         processor.cycle();
@@ -686,10 +658,8 @@ mod tests {
     fn test_opcode_8xy4() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x86);
         update_buffer(ram, (START_PC + 1) as usize, 0xA4);
         processor.cycle();
@@ -704,10 +674,8 @@ mod tests {
     fn test_opcode_8xy4_with_overflow() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x86);
         update_buffer(ram, (START_PC + 1) as usize, 0xA4);
         processor.registers[0xA] = 0xFF;
@@ -723,10 +691,8 @@ mod tests {
     fn test_opcode_8xy5() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x8A);
         update_buffer(ram, (START_PC + 1) as usize, 0x65);
         processor.registers[0xA] = 6;
@@ -747,10 +713,8 @@ mod tests {
     fn test_opcode_8xy5_with_overflow() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x86);
         update_buffer(ram, (START_PC + 1) as usize, 0xA5);
         processor.cycle();
@@ -765,10 +729,8 @@ mod tests {
     fn test_opcode_8xy7() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x86);
         update_buffer(ram, (START_PC + 1) as usize, 0xA7);
         processor.registers[0x6] = 3;
@@ -791,10 +753,8 @@ mod tests {
     fn test_opcode_8xy7_with_overflow() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0x8A);
         update_buffer(ram, (START_PC + 1) as usize, 0x67);
         processor.cycle();
@@ -809,10 +769,8 @@ mod tests {
     fn test_opcode_8xye() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         processor.registers[0] = 0xFF;
         update_buffer(ram, (START_PC) as usize, 0x80);
         update_buffer(ram, (START_PC + 1) as usize, 0x6E);
@@ -834,10 +792,8 @@ mod tests {
     fn test_opcode_8xy6() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         processor.registers[0] = 0xFF;
         update_buffer(ram, (START_PC) as usize, 0x80);
         update_buffer(ram, (START_PC + 1) as usize, 0x66);
@@ -859,10 +815,8 @@ mod tests {
     fn test_opcode_annn() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0xA0);
         update_buffer(ram, (START_PC + 1) as usize, 0x12);
         processor.cycle();
@@ -875,10 +829,8 @@ mod tests {
     fn test_opcode_bnnn() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         update_buffer(ram, (START_PC) as usize, 0xB0);
         update_buffer(ram, (START_PC + 1) as usize, 0x12);
         processor.cycle();
@@ -890,16 +842,14 @@ mod tests {
     fn test_opcode_ex9e_press() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
-        let keyboard_buffer = match Rc::get_mut(&mut processor.keyboard_buffer) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve display buffer"),
-        };
-        keyboard_buffer[0] = 1;
+        *processor
+            .keyboard_buffer
+            .as_ref()
+            .borrow_mut()
+            .buffer
+            .borrow_mut() = [1; consts::KEYBOARD_SIZE];
         update_buffer(ram, (START_PC) as usize, 0xE1);
         update_buffer(ram, (START_PC + 1) as usize, 0x9E);
         processor.cycle();
@@ -911,10 +861,7 @@ mod tests {
     fn test_opcode_ex9e_unpress() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         update_buffer(ram, (START_PC) as usize, 0xE1);
         update_buffer(ram, (START_PC + 1) as usize, 0x9E);
@@ -927,16 +874,14 @@ mod tests {
     fn test_opcode_exa1_press() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
-        let keyboard_buffer = match Rc::get_mut(&mut processor.keyboard_buffer) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve display buffer"),
-        };
-        keyboard_buffer[0] = 1;
+        *processor
+            .keyboard_buffer
+            .as_ref()
+            .borrow_mut()
+            .buffer
+            .borrow_mut() = [1; consts::KEYBOARD_SIZE];
         update_buffer(ram, (START_PC) as usize, 0xE1);
         update_buffer(ram, (START_PC + 1) as usize, 0xA1);
         processor.cycle();
@@ -948,10 +893,7 @@ mod tests {
     fn test_opcode_exa1_unpress() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         update_buffer(ram, (START_PC) as usize, 0xE1);
         update_buffer(ram, (START_PC + 1) as usize, 0xA1);
@@ -964,17 +906,14 @@ mod tests {
     fn test_opcode_fx07() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         processor.delay_timer = 10;
         update_buffer(ram, (START_PC) as usize, 0xF1);
         update_buffer(ram, (START_PC + 1) as usize, 0x07);
         processor.cycle();
         assert_eq!(processor.pc, NEXT_PC);
-        assert_eq!(processor.registers[1], 10);
+        assert_eq!(processor.registers[1], 9);
         Ok(())
     }
 
@@ -982,10 +921,7 @@ mod tests {
     fn test_opcode_fx15() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         processor.registers[1] = 10;
         update_buffer(ram, (START_PC) as usize, 0xF1);
@@ -1000,10 +936,7 @@ mod tests {
     fn test_opcode_fx18() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         processor.registers[1] = 10;
         update_buffer(ram, (START_PC) as usize, 0xF1);
@@ -1018,10 +951,7 @@ mod tests {
     fn test_opcode_fx1e() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         processor.registers[1] = 0x8;
         processor.idx_register = 0xFFFF;
@@ -1038,24 +968,23 @@ mod tests {
     fn test_opcode_fx0a() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
 
         update_buffer(ram, (START_PC) as usize, 0xF1);
         update_buffer(ram, (START_PC + 1) as usize, 0x0A);
         processor.cycle();
         assert_eq!(processor.pc, START_PC);
 
-        let keyboard_buffer = match Rc::get_mut(&mut processor.keyboard_buffer) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve display buffer"),
-        };
-        keyboard_buffer[0xF] = 1;
+        *processor
+            .keyboard_buffer
+            .as_ref()
+            .borrow_mut()
+            .buffer
+            .borrow_mut() = [1; consts::KEYBOARD_SIZE];
+
         processor.cycle();
         assert_eq!(processor.pc, NEXT_PC);
-        assert_eq!(processor.registers[1], 0xF);
+        assert_eq!(processor.registers[1], 0);
         Ok(())
     }
 
@@ -1063,10 +992,8 @@ mod tests {
     fn test_opcode_fx33() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         processor.idx_register = 25;
         processor.registers[4] = 156;
         update_buffer(ram, (START_PC) as usize, 0xF4);
@@ -1083,10 +1010,8 @@ mod tests {
     fn test_opcode_fx55() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         processor.idx_register = 25;
         processor.registers[0] = 12;
         processor.registers[1] = 25;
@@ -1108,10 +1033,8 @@ mod tests {
     fn test_opcode_fx65() -> Result<(), &'static str> {
         let mut processor = build_processor()?;
 
-        let ram = match Rc::get_mut(&mut processor.ram) {
-            Some(t) => &mut t.buffer,
-            None => return Err("Failed test, could not retrieve ram buffer"),
-        };
+        let ram: &mut [u8] = processor.ram.buffer.borrow_mut();
+
         processor.idx_register = 0;
         ram[0] = 12;
         ram[1] = 25;
