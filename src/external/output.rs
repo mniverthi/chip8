@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct DisplayDriver {
-    pub screen: Canvas<Window>,
+    pub canvas: Canvas<Window>,
     pub display_buffer: Rc<RefCell<DisplayBuffer>>,
 }
 
@@ -32,7 +32,7 @@ impl DisplayDriver {
         canvas.present();
 
         Ok(DisplayDriver {
-            screen: canvas,
+            canvas,
             display_buffer: Rc::clone(display_buffer_),
         })
     }
@@ -42,7 +42,7 @@ impl DisplayDriver {
                 let i = (x as u32) * consts::SCALE_FACTOR;
                 let j = (y as u32) * consts::SCALE_FACTOR;
 
-                self.screen.set_draw_color(match col {
+                self.canvas.set_draw_color(match col {
                     0 => Color {
                         r: 0,
                         g: 0,
@@ -57,7 +57,7 @@ impl DisplayDriver {
                     },
                     _ => return Err("Invalid (non-binary) pixel value"),
                 });
-                let _ = self.screen.fill_rect(Rect::new(
+                let _ = self.canvas.fill_rect(Rect::new(
                     i as i32,
                     j as i32,
                     consts::SCALE_FACTOR,
@@ -65,7 +65,6 @@ impl DisplayDriver {
                 ));
             }
         }
-        self.screen.present();
         Ok(())
     }
 }
