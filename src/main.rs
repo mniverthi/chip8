@@ -1,5 +1,3 @@
-extern crate sdl2;
-
 pub mod consts;
 pub mod core;
 pub mod external;
@@ -39,10 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     chip8.init_ram(&prog, &consts::FONT_SET)?;
 
     loop {
-        let keyboard_status = match keyboard.poll() {
-            Ok(_) => true,
-            Err(_) => false,
-        };
+        let keyboard_status = keyboard.poll().is_ok();
         if !keyboard_status {
             break;
         }

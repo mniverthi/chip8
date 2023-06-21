@@ -66,8 +66,8 @@ impl Processor {
                     self.pc -= consts::OP_CODE_BYTES as u16;
                     return Some(CycleStatus::Waiting);
                 } else {
-                    for i in 0..consts::KEYBOARD_SIZE {
-                        if keyboard[i] == 1 {
+                    for i in keyboard {
+                        if i == 1 {
                             self.registers[x as usize] = i as u8;
                             break;
                         }
@@ -93,7 +93,7 @@ impl Processor {
                     .borrow_mut()
                     .buffer
                     .iter_mut()
-                    .for_each(|x| *x = [0 as u8; consts::CHIP8_WIDTH]);
+                    .for_each(|x| *x = [0_u8; consts::CHIP8_WIDTH]);
                 return Some(CycleStatus::RedrawScreen);
             }
 
@@ -197,27 +197,27 @@ impl Processor {
             (8, _, _, 4) => {
                 if ((self.registers[x as usize] as u16) + (self.registers[y as usize] as u16)) > 255
                 {
-                    self.registers[0xF as usize] = 1;
+                    self.registers[0xF_usize] = 1;
                 } else {
-                    self.registers[0xF as usize] = 0;
+                    self.registers[0xF_usize] = 0;
                 }
                 self.registers[x as usize] =
                     self.registers[x as usize].wrapping_add(self.registers[y as usize]);
             }
             (8, _, _, 5) => {
                 if self.registers[x as usize] >= self.registers[y as usize] {
-                    self.registers[0xF as usize] = 1;
+                    self.registers[0xF_usize] = 1;
                 } else {
-                    self.registers[0xF as usize] = 0;
+                    self.registers[0xF_usize] = 0;
                 }
                 self.registers[x as usize] =
                     self.registers[x as usize].wrapping_sub(self.registers[y as usize]);
             }
             (8, _, _, 7) => {
                 if self.registers[y as usize] >= self.registers[x as usize] {
-                    self.registers[0xF as usize] = 1;
+                    self.registers[0xF_usize] = 1;
                 } else {
-                    self.registers[0xF as usize] = 0;
+                    self.registers[0xF_usize] = 0;
                 }
                 self.registers[x as usize] =
                     self.registers[y as usize].wrapping_sub(self.registers[x as usize]);
@@ -589,7 +589,7 @@ mod tests {
         update_buffer(ram, (START_PC + 1) as usize, 0xFF);
         processor.cycle();
         assert_eq!(processor.pc, NEXT_PC);
-        assert_eq!(processor.registers[3], (0xFF as u8).wrapping_add(1 as u8));
+        assert_eq!(processor.registers[3], 0xFF_u8.wrapping_add(1_u8));
         assert_eq!(processor.registers[0xF], 0);
         Ok(())
     }

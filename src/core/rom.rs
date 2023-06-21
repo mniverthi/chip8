@@ -24,6 +24,6 @@ impl Rom {
         if status <= data.buffer.len() {
             return Ok(data);
         }
-        return Err("Mismatch in expected ROM size and number of bytes read".into());
+        Err("Mismatch in expected ROM size and number of bytes read".into())
     }
 }
