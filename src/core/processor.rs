@@ -21,7 +21,7 @@ pub struct Processor {
     pub pc: u16,
     pub stack_pointer: u8,
     pub delay_timer: u8,
-    pub sound_timer: u8,
+    pub sound_timer: Rc<RefCell<u8>>,
     pub ram: ram::Ram,
     pub display_buffer: Rc<RefCell<ram::DisplayBuffer>>,
     pub keyboard_buffer: Rc<RefCell<ram::KeyboardBuffer>>,
@@ -76,11 +76,11 @@ impl Processor {
                 return Some(CycleStatus::Continue);
             }
             (_, _, _, _) => {
+                if *self.sound_timer.as_ref().borrow() > 0 {
+                    *self.sound_timer.as_ref().borrow_mut() -= 1
+                }
                 if self.delay_timer > 0 {
                     self.delay_timer -= 1
-                }
-                if self.sound_timer > 0 {
-                    self.sound_timer -= 1
                 }
             }
         }
@@ -270,7 +270,7 @@ impl Processor {
                 self.delay_timer = self.registers[x as usize];
             }
             (0xF, _, 1, 8) => {
-                self.sound_timer = self.registers[x as usize];
+                *self.sound_timer.as_ref().borrow_mut() = self.registers[x as usize];
             }
 
             // Update index register
@@ -943,7 +943,7 @@ mod tests {
         update_buffer(ram, (START_PC + 1) as usize, 0x18);
         processor.cycle();
         assert_eq!(processor.pc, NEXT_PC);
-        assert_eq!(processor.sound_timer, 10);
+        assert_eq!(*processor.sound_timer.as_ref().borrow(), 10);
         Ok(())
     }
 

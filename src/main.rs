@@ -33,8 +33,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sdl_context = sdl2::init()?;
     let mut chip8 = processor::Processor::new(ram_, display_ram_, keyboard_buffer_);
     let mut keyboard = input::KeyboardDriver::new(&sdl_context, &chip8.keyboard_buffer)?;
-
     let mut screen = output::DisplayDriver::new(&sdl_context, &chip8.display_buffer)?;
+    let audio = output::AudioDriver::new(&sdl_context, &chip8.sound_timer)?;
 
     chip8.init_ram(&prog, &consts::FONT_SET)?;
 
@@ -50,13 +50,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(a) => a,
             None => panic!("Failed during execution, exiting..."),
         };
+        if *audio.sound_timer.as_ref().borrow() > 0 {
+            audio.speaker.resume();
+        } else {
+            audio.speaker.pause();
+        }
         match status {
             processor::CycleStatus::RedrawScreen => {
                 screen.draw()?;
             }
             _ => continue,
         }
-
         thread::sleep(std::time::Duration::from_millis(
             consts::CLOCK_PERIOD as u64,
         ));

@@ -1,5 +1,6 @@
 use crate::consts;
 use crate::core::ram::DisplayBuffer;
+use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -66,5 +67,60 @@ impl DisplayDriver {
         }
         self.screen.present();
         Ok(())
+    }
+}
+
+// Based on https://github.com/Rust-SDL2/rust-sdl2/blob/master/examples/audio-squarewave.rs
+pub struct SquareWave {
+    phase_inc: f32,
+    phase: f32,
+    volume: f32,
+}
+
+impl AudioCallback for SquareWave {
+    type Channel = f32;
+
+    fn callback(&mut self, out: &mut [f32]) {
+        for x in out.iter_mut() {
+            *x = if self.phase <= 0.5 {
+                self.volume
+            } else {
+                -self.volume
+            };
+            self.phase = (self.phase + self.phase_inc) % 1.0;
+        }
+    }
+}
+pub struct AudioDriver {
+    pub speaker: AudioDevice<SquareWave>,
+    pub sound_timer: Rc<RefCell<u8>>,
+}
+
+impl AudioDriver {
+    pub fn new(context: &sdl2::Sdl, sound_timer_: &Rc<RefCell<u8>>) -> Result<Self, &'static str> {
+        let audio_subsystem = match context.audio() {
+            Ok(r) => r,
+            Err(_) => return Err("Could not obtain audio context"),
+        };
+        let device = match audio_subsystem.open_playback(
+            None,
+            &AudioSpecDesired {
+                freq: Some(44100),
+                channels: Some(1),
+                samples: None,
+            },
+            |spec| SquareWave {
+                phase_inc: 440.0 / spec.freq as f32,
+                phase: 0.0,
+                volume: 0.25,
+            },
+        ) {
+            Ok(r) => r,
+            Err(_) => return Err("Failed to initialize audio device"),
+        };
+        Ok(AudioDriver {
+            speaker: device,
+            sound_timer: Rc::clone(sound_timer_),
+        })
     }
 }
